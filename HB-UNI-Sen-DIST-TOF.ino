@@ -25,6 +25,8 @@
 #define BATT_EN_PIN        15 //A1
 #define BATT_SENS_PIN      17 //A3
 
+#define MANUAL_MEASURE_BTN 9
+
 // number of available peers per channel
 #define PEERS_PER_CHANNEL  6
 
@@ -155,13 +157,17 @@ class MeasureChannel : public Channel<Hal, UList1, EmptyList, List4, PEERS_PER_C
       DPRINT(F("DISTANCE(")); DDEC(number()); DPRINT(F("): ")); DDEC(distance); DPRINTLN(F(" mm"));
     }
 
-    virtual void trigger (__attribute__ ((unused)) AlarmClock& clock) {
+    void measureAndSend() {
       measure();
-      tick = delay();
       uint8_t msgcnt = device().nextcount();
       msg.init(msgcnt, number(), distance,  device().battery().current());
       if (msgcnt % 20 == 1) device().sendPeerEvent(msg, *this); else device().broadcastEvent(msg, *this);
+    }
+
+    virtual void trigger (__attribute__ ((unused)) AlarmClock& clock) {
+      tick = delay();
       sysclock.add(*this);
+      measureAndSend();
     }
 
     uint32_t delay () {
@@ -204,14 +210,30 @@ class UType : public MultiChannelDevice<Hal, MeasureChannel, 1, UList0> {
     }
 };
 
+class MeasureButton : public StateButton<HIGH,LOW,INPUT_PULLUP> {
+  UType& device;
+public:
+  typedef StateButton<HIGH,LOW,INPUT_PULLUP> ButtonType;
+  MeasureButton (UType& dev,uint8_t longpresstime=10) : device(dev) { this->setLongPressTime(seconds2ticks(longpresstime)); }
+  virtual ~MeasureButton () {}
+  virtual void state (uint8_t s) {
+    ButtonType::state(s);
+    if( s == ButtonType::released ) {
+      device.channel(1).measureAndSend();
+    }
+  }
+};
+
 UType sdev(devinfo, 0x20);
 ConfigButton<UType> cfgBtn(sdev);
+MeasureButton measureBtn(sdev);
 
 void setup () {
   DINIT(57600, ASKSIN_PLUS_PLUS_IDENTIFIER);
   sdev.init(hal);
   DDEVINFO(sdev);
   buttonISR(cfgBtn, CONFIG_BUTTON_PIN);
+  buttonISR(measureBtn, MANUAL_MEASURE_BTN);
   sdev.initDone();
 }
 
@@ -222,5 +244,3 @@ void loop() {
     hal.activity.savePower<Sleep<>>(hal);
   }
 }
-
-
